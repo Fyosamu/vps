@@ -20,16 +20,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 355
     steps:
-      - name: "1/4 install tailscale + start tailscaled"
+      - name: "1/4 install tailscale + start daemon"
         run: |
           curl -fsSL https://tailscale.com/install.sh | sh
-          sudo mkdir -p /var/lib/tailscale /var/run/tailscale
-          sudo tailscaled --state=/var/lib/tailscale/ts.state --socket=$TS_SOCK >/tmp/tailscaled.log 2>&1 &
+          sudo systemctl enable --now tailscaled
           for i in $(seq 1 30); do
-            sudo tailscale --socket=$TS_SOCK status >/dev/null 2>&1 && break
+            [ -S /var/run/tailscale/tailscaled.sock ] && break
             sleep 1
           done
-          sudo tailscale --socket=$TS_SOCK status
+          test -S /var/run/tailscale/tailscaled.sock
+          sudo tailscale status || true
 
       - name: "2/4 join tailnet + advertise exit node"
         env:
