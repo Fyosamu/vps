@@ -20,15 +20,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 355
     steps:
+      - name: "0/4 restore tailscale identity"
+        uses: actions/cache@v4
+        with:
+          path: /var/lib/tailscale
+          key: tsstate-${{ github.run_id }}
+          restore-keys: |
+            tsstate-
+
       - name: "1/4 install tailscale + start daemon"
         run: |
           curl -fsSL https://tailscale.com/install.sh | sh
           sudo systemctl enable --now tailscaled
           for i in $(seq 1 30); do
-            [ -S /var/run/tailscale/tailscaled.sock ] && break
+            [ -S $TS_SOCK ] && break
             sleep 1
           done
-          test -S /var/run/tailscale/tailscaled.sock
+          test -S $TS_SOCK
           sudo tailscale status || true
 
       - name: "2/4 join tailnet + advertise exit node"
@@ -68,6 +76,6 @@ jobs:
           fi
           sleep 30
 
-      - name: "4/4 clean logout"
+      - name: "4/4 make state cacheable"
         if: always()
-        run: sudo tailscale --socket=$TS_SOCK logout || true
+        run: sudo chown -R $(whoami) /var/lib/tailscale || true
