@@ -1,0 +1,71 @@
+name: Exit Node - always on
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "10 */6 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exit-node-always-on
+  cancel-in-progress: false
+
+env:
+  TS_SOCK: /var/run/tailscale/tailscaled.sock
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - name: "1/4 tailscaled up"
+        run: |
+          sudo mkdir -p /var/lib/tailscale /var/run/tailscale
+          sudo tailscaled --state=/var/lib/tailscale/ts.state --socket=$TS_SOCK >/tmp/tailscaled.log 2>&1 &
+          for i in $(seq 1 30); do
+            sudo tailscale --socket=$TS_SOCK status >/dev/null 2>&1 && break
+            sleep 1
+          done
+
+      - name: "2/4 join tailnet + advertise exit node"
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+        run: |
+          sudo sysctl -w net.ipv4.ip_forward=1
+          sudo sysctl -w net.ipv6.conf.all.forwarding=1
+          sudo sysctl -w net.ipv4.conf.all.rp_filter=0
+          sudo tailscale --socket=$TS_SOCK up \
+            --authkey="$TAILSCALE_AUTHKEY" \
+            --hostname="exit-node-gh" \
+            --advertise-exit-node \
+            --accept-dns=false
+          sleep 5
+          sudo tailscale --socket=$TS_SOCK status
+          echo "runner public IP: $(curl -4 -s --max-time 10 https://ifconfig.me || true)"
+
+      - name: "3/4 stay alive 5h20m then chain next run"
+        env:
+          CHAIN_TOKEN: ${{ secrets.CHAIN_TOKEN }}
+        run: |
+          for i in $(seq 1 32); do
+            sleep 600
+            echo "[heartbeat $i/32] $(date -u +%H:%M) still routing"
+          done
+          code=$(curl -s -o /tmp/dispatch.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $CHAIN_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/Fyosamu/vps/actions/workflows/exit-node.yml/dispatches \
+            -d '{"ref":"main"}')
+          echo "dispatch next run -> HTTP $code"
+          if [ "$code" != "204" ]; then
+            echo "chain dispatch failed:"
+            cat /tmp/dispatch.json
+            exit 1
+          fi
+          sleep 30
+
+      - name: "4/4 clean logout"
+        if: always()
+        run: sudo tailscale --socket=$TS_SOCK logout || true
