@@ -20,6 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 355
     steps:
+      - name: "-1/4 prep state dir for cache restore"
+        run: |
+          sudo mkdir -p /var/lib/tailscale
+          sudo chown -R $(whoami) /var/lib/tailscale
+
       - name: "0/4 restore tailscale identity"
         uses: actions/cache@v4
         with:
